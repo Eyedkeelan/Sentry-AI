@@ -23,7 +23,7 @@ def extract_directory(VIDEO_DIR = VIDEO_DIR, OUTPUT_DIR= OUTPUT_DIR):
 
 
     model = models.resnet18(pretrained = True)
-    model = nn.Sequential(*list(model.children())[:-1]) # Removing the final layer enables me to extract features as opposed to a final layer
+    model = nn.Sequential(*list(model.children())[:-1]) # Removing the final layer enables me to extract features with width and spacial dimentions
 
     transform = transforms.Compose([transforms.ToPILImage(), transforms.Resize((224,224)),transforms.ToTensor()])
 
@@ -31,7 +31,7 @@ def extract_directory(VIDEO_DIR = VIDEO_DIR, OUTPUT_DIR= OUTPUT_DIR):
     # Process videos recursively
     metadata = []
     for root, _, files in os.walk(VIDEO_DIR):
-        for video_file in tqdm(files):
+        for video_file in tqdm(files, desc = f"Processing: {root}"):
             if not video_file.endswith((".mp4", ".avi", ".mov")):
                 continue
 
@@ -61,7 +61,7 @@ def extract_directory(VIDEO_DIR = VIDEO_DIR, OUTPUT_DIR= OUTPUT_DIR):
                     image_tensor = transform(frame).unsqueeze(0).to(device)
                     with torch.no_grad():
                         features = model(image_tensor)
-                    feature_vector = features.cpu().numpy().flatten()
+                    feature_vector = features.squeeze(0).cpu().numpy()  # Shape: (512, 7, 7)
 
                     # Save feature vector
                     feature_path = os.path.join(feature_output_dir, frame_filename.replace(".jpg", ".npy"))
