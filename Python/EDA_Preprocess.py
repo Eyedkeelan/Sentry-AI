@@ -19,12 +19,16 @@ ANOM_PATH = os.path.join(BASE_DIR, "OneDrive_2025-01-30", "MSAD Dataset", "anoma
 META_PATH = os.path.join(BASE_DIR, "Dataset", "metadata.csv")
 TEST_PATH = os.path.join(BASE_DIR, "Dataset", "MSAD_I3D_WS_Test.list")
 TRAIN_PATH = os.path.join(BASE_DIR, "Dataset", "MSAD_I3D_WS_Train.list")
-
-
-
+FEATURE_PATH = os.path.join(BASE_DIR,"Dataset","features")
+################## THESE SHOULD BE CONSISTENT WITH Feature_extraction.py
+FRAME_INTERVAL = 5  # Capture every 5th frame
+CLIP_LENGTH = 16  # Number of frames per clip for 3D CNN
+################## 
 ANOM_df = pd.read_csv(ANOM_PATH)
 
 META_df = pd.read_csv(META_PATH)
+META_df['Start_of_Clip'] = (META_df['clip_index'] + 1)*5
+META_df['End_of_Clip'] = (META_df['clip_index'] + 1 + CLIP_LENGTH)*5
 print(f"{ANOM_df.head(3)}\n{META_df.head(3)}")
 
 
@@ -36,12 +40,15 @@ df = META_df.merge(ANOM_df,how='left',on='name')
 df['starting frame of anomaly'].fillna(99999,inplace= True)
 df['ending frame of anomaly'].fillna(99999,inplace= True) # I have set these frames to a high value as this enables all 'normal' events to not be registered within the anomaly ranges
 
-df['Anomaly'] = np.where((df['starting frame of anomaly'] <= df['frame_number']) & 
-                         (df['ending frame of anomaly'] >= df['frame_number']), 1, 0)
+df['Anomaly'] = np.where(
+    (df['starting frame of anomaly'] <= df['End_of_Clip']) & 
+    (df['ending frame of anomaly'] >= df['Start_of_Clip']),
+    1, 0)
 
-df['Anomaly_Type'] = np.where((df['starting frame of anomaly'] <= df['frame_number']) & 
-                              (df['ending frame of anomaly'] >= df['frame_number']),
-                              df['name'].str.split('_').str[0], "Normal")
+df['Anomaly_Type'] = np.where(
+    (df['starting frame of anomaly'] <= df['End_of_Clip']) & 
+    (df['ending frame of anomaly'] >= df['Start_of_Clip']),
+    df['name'].str.split('_').str[0], "Normal")
 corrections = {
     "MSAD_normal_testing_": np.nan,
     "perdestrian_street": "pedestrian_street"
@@ -105,7 +112,7 @@ df_appender['name'] = df_appender['name'].replace('perdestrian', 'pedestrian', r
 df['name'] = df['name'].replace('perdestrian', 'pedestrian', regex=True)
 df['name'] = df['name'].replace('MSAD_normal_', '', regex=True)
 df = df.merge(df_appender, how='left', on='name')
-
+df['name'].replace({".mp4":''},regex = True, inplace= True)
 df.to_csv('test_train.csv')
 
 df_train = df[df['Partition'] == 'Train'].drop(columns=['Partition'])
@@ -116,14 +123,16 @@ overlap = set(df_train['name']).intersection(set(df_test['name']))
 print(f"Overlap between train and test sets: {overlap}")
 
 
+df_train.to_csv("TRAIN_INSPECT.csv")
+
 #T-sne, first I will extract CNN features and corresponding labels (type of anomaly)
 
 features = []
 anon_type = []
 anon_bool = []
 
-for path, label, lab_bool in tqdm(zip(df_train['feature_path'],df_train['Anomaly_Type'],df_train['Anomaly'])):
-    feature = np.load(path)
+for path,subdir, label, lab_bool in tqdm(zip(df_train['feature_path'],df_train['subfolder'],df_train['Anomaly_Type'],df_train['Anomaly'])):
+    feature = np.load(os.path.join(FEATURE_PATH,subdir,path))
     features.append(feature)
     anon_type.append(label)
     anon_bool.append(lab_bool)
@@ -141,9 +150,9 @@ df_test.to_csv('Test_set.csv')
 # Applying to the t-sne with perplexity optimisation\
 
 kldiv_list = []
-perplex_list = [5, 15 , 30, 40 , 50, 60, 100]
+perplex_list = [5, 15 , 30, 40 , 50, 60, 100, 150, 200]
 for perplexity in tqdm(perplex_list):
-    tsne = TSNE(n_components=2, perplexity = perplexity ,n_iter=1000, random_state= 42)
+    tsne = TSNE(n_components=2, perplexity = perplexity ,n_iter=1000, random_state = 42)
     tsne.fit_transform(features_scaled)
     kldiv_list.append(tsne.kl_divergence_)
 
@@ -155,7 +164,7 @@ plt.title("T-distributed Stochastic Neighbor Embedding (Perplexity fine-tuning)"
 plt.show()
 
 
-tsne = TSNE(n_components=2, perplexity= 50,n_iter=2500, random_state= 42)
+tsne = TSNE(n_components=2, perplexity= 100,n_iter=2500, random_state= 42)
 tsne_results = tsne.fit_transform(features_scaled)
 
 # Visualisation
