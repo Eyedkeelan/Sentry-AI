@@ -78,6 +78,38 @@ plt.title('Anomaly vs Normal Distribution')
 plt.show()
 print(df['Anomaly'].value_counts(normalize=True) * 100)
 
+
+print(df.columns)
+
+#Anomaly types with Normal
+
+sns.countplot(x='Anomaly_Type', data=df)
+plt.title('Label overview')
+plt.xticks(rotation=30)
+plt.show()
+print(df['Anomaly_Type'].value_counts(normalize=True) * 100)
+
+#Anomaly types excluding normal
+df_anomalies = df[df['Anomaly_Type'] != 'Normal'].copy()
+
+# Create a crosstab to count occurrences of each Anomaly_Type split by scenario
+anomaly_counts = pd.crosstab(df_anomalies['Anomaly_Type'], df_anomalies['scenario'])
+
+# Plot a stacked bar chart using Matplotlib
+anomaly_counts.plot(kind='bar', stacked=True, colormap='viridis')
+
+plt.title('Anomaly Types (Stacked by Scenario)')
+plt.xticks(rotation=30)
+plt.xlabel('Anomaly Type')
+plt.ylabel('Count')
+plt.legend(title="Scenario", loc='upper right')
+
+plt.show()
+
+
+print(df_anomalies['Anomaly_Type'].value_counts(normalize=True) * 100)
+
+
 # We will follow the predefined test-train split
 with open(TRAIN_PATH, 'r') as train, open(TEST_PATH,'r') as test:
     train_list, test_list = train.readlines(), test.readlines()
@@ -148,6 +180,33 @@ features_scaled = scaler.fit_transform(features)
 df_train.to_csv('Train_set.csv')
 df_test.to_csv('Test_set.csv')
 # Applying to the t-sne with perplexity optimisation\
+
+from sklearn.decomposition import PCA
+
+# Apply PCA
+pca = PCA(n_components=0.60) # Retain 95% of variance
+pca_results = pca.fit_transform(features_scaled)
+
+print(f"Number of components retained: {pca.n_components_}")
+print(f"Explained variance ratio: {pca.explained_variance_ratio_}")
+print(f"Total explained variance: {sum(pca.explained_variance_ratio_)}")
+
+# Visualization of PCA results
+plt.figure(figsize=(10, 8))
+sns.scatterplot(x=pca_results[:, 0], y=pca_results[:, 1], hue=anon_bool, palette=['blue', 'red'], alpha=0.7)
+plt.title('PCA Anomaly Visualisation of Image Features')
+plt.xlabel('Principal Component 1')
+plt.ylabel('Principal Component 2')
+plt.legend(title='Anomaly')
+plt.show()
+
+plt.figure(figsize=(10, 8))
+sns.scatterplot(x=pca_results[:, 0], y=pca_results[:, 1], hue=anon_type, alpha=0.7)
+plt.title('PCA by Anomaly Type Visualisation of Image Features')
+plt.xlabel('Principal Component 1')
+plt.ylabel('Principal Component 2')
+plt.legend(title='Anomaly')
+plt.show()
 
 kldiv_list = []
 perplex_list = [5, 15 , 30, 40 , 50, 60, 100, 150, 200]
