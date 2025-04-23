@@ -19,6 +19,9 @@ import cv2
 from PIL import Image
 
 
+Training = False
+
+
 # %%
 FRAME_INTERVAL = 5  # Capture every 5th frame
 CLIP_LENGTH = 16  # Number of frames per clip for 3D CNN
@@ -31,7 +34,7 @@ torch.cuda.is_available()
 os.listdir()
 
 # %%
-project_path = r"/mnt/scratch/od22kob/MSC Final"
+project_path = r"C:\Users\Keelan24\Documents\My Projects\MSC Final"
 
 MSAD_File_Name = "OneDrive_2025-03-06"
 
@@ -96,11 +99,11 @@ def extract_and_save_frames(video_path, save_dir, frame_interval=5):
 
 # %%
 # My iteration through
-for root, _, files in os.walk(VIDEO_DIR):
-    for video_file in tqdm(files, desc=f"Extracting Frames {root}"):
-        if video_file.endswith((".mp4", ".avi", ".mov")):
-            video_path = os.path.join(root, video_file)
-            extract_and_save_frames(video_path, SAVE_DIR)
+#for root, _, files in os.walk(VIDEO_DIR):
+#    for video_file in tqdm(files, desc=f"Extracting Frames {root}"):
+#        if video_file.endswith((".mp4", ".avi", ".mov")):
+#            video_path = os.path.join(root, video_file)
+#            extract_and_save_frames(video_path, SAVE_DIR)
 
 # %%
 anomaly = []
@@ -280,8 +283,8 @@ class FrameDataset(Dataset):
 training_dataset = FrameDataset(labels_df = df_train)
 testing_dataset = FrameDataset(labels_df = df_test)
 print("Training dataset size: {}\ntesting dataset size: {}".format(len(training_dataset),len(testing_dataset)))
-num_workers = os.cpu_count() - 1
-
+#num_workers = os.cpu_count() - 1
+num_workers = 0
 
 clip_labels = []
 for i in range(len(training_dataset)):
@@ -360,82 +363,85 @@ best_loss = np.inf
 threshhold = 0.5 
 
 # Training Loop
-for epoch in range(epochs):
-    epoch_loss = 0.0
-    model_binary.train()
+if Training:
+  for epoch in range(epochs):
+      epoch_loss = 0.0
+      model_binary.train()
+  
+      for frames, labels in tqdm(training_dataloader, desc=f"Training pass epoch: {epoch}"):
+          torch.cuda.empty_cache()  
+          slow_frames, fast_frames = frames  # Unpack SlowFast inputs
+          
+          slow_frames, fast_frames, labels = (
+              slow_frames.to(device),
+              fast_frames.to(device),
+              labels.to(device),
+          )
+  
+          slow_frames = slow_frames.permute(0, 4, 2, 3, 1)
+          fast_frames = fast_frames.permute(0, 4, 2, 3, 1)
+          
+          
+          #print("slow_frames shape:", slow_frames.shape)
+          #print("fast_frames shape:", fast_frames.shape)
+  
+          pred = model_binary(slow_frames, fast_frames)
+          loss = loss_function(pred.squeeze(), labels.float())
+  
+          optimiser.zero_grad()
+          loss.backward()
+          optimiser.step()
+          
+          epoch_loss += loss.item()
+          torch.cuda.empty_cache()  
+      # Store training loss
+      losses[0, epoch] = epoch_loss / len(training_dataloader)
+  
+      # Validation Loop
+      model_binary.eval()
+      test_loss = 0.0
+  
+      with torch.no_grad():
+          for test_frames, test_labels in tqdm(testing_dataloader, desc="Cycling Testing Dataloader"):
+              slow_test_frames, fast_test_frames = test_frames  # Unpack test data
+              
+              slow_test_frames, fast_test_frames, test_labels = (
+                  slow_test_frames.to(device),
+                  fast_test_frames.to(device),
+                  test_labels.to(device),
+              )
+              slow_test_frames = slow_test_frames.permute(0, 4, 2, 3, 1)
+              fast_test_frames = fast_test_frames.permute(0, 4, 2, 3, 1)
+  
+              test_preds = model_binary(slow_test_frames, fast_test_frames)  
+              t_loss = loss_function(test_preds.squeeze(), test_labels.float())
+  
+              test_loss += t_loss.item()
+              
+      losses[1, epoch] = test_loss / len(testing_dataloader)
+  
+      # Save best model
+      if best_loss > losses[1, epoch]:
+          best_loss = losses[1, epoch] 
+          print(f"Saving Optimal model: {epoch + 1} epoch")
+          torch.save(model_binary.state_dict(), os.path.join("Best_Models", "E2E_SF.pt"))
+  
+      print(f"Epoch [{epoch+1}/{epochs}] - Training Loss: {losses[0,epoch]:.4f}, Test Loss: {losses[1,epoch]:.4f}")
+  
+  # %%
+  plt.plot(losses[0], label = 'Training')
+  plt.plot(losses[1], label = 'Testing')
+  plt.grid()
+  plt.xlabel("Epochs")
+  plt.ylabel("Loss")
+  plt.legend()
+  plt.title("Slow-Fast Binary Classification Model")
+  plt.savefig("Training_E2E_SF_Binary.png")
+  plt.show()
+  
+  # %%
 
-    for frames, labels in tqdm(training_dataloader, desc=f"Training pass epoch: {epoch}"):
-        torch.cuda.empty_cache()  
-        slow_frames, fast_frames = frames  # Unpack SlowFast inputs
-        
-        slow_frames, fast_frames, labels = (
-            slow_frames.to(device),
-            fast_frames.to(device),
-            labels.to(device),
-        )
 
-        slow_frames = slow_frames.permute(0, 4, 2, 3, 1)
-        fast_frames = fast_frames.permute(0, 4, 2, 3, 1)
-        
-        
-        #print("slow_frames shape:", slow_frames.shape)
-        #print("fast_frames shape:", fast_frames.shape)
-
-        pred = model_binary(slow_frames, fast_frames)
-        loss = loss_function(pred.squeeze(), labels.float())
-
-        optimiser.zero_grad()
-        loss.backward()
-        optimiser.step()
-        
-        epoch_loss += loss.item()
-        torch.cuda.empty_cache()  
-    # Store training loss
-    losses[0, epoch] = epoch_loss / len(training_dataloader)
-
-    # Validation Loop
-    model_binary.eval()
-    test_loss = 0.0
-
-    with torch.no_grad():
-        for test_frames, test_labels in tqdm(testing_dataloader, desc="Cycling Testing Dataloader"):
-            slow_test_frames, fast_test_frames = test_frames  # Unpack test data
-            
-            slow_test_frames, fast_test_frames, test_labels = (
-                slow_test_frames.to(device),
-                fast_test_frames.to(device),
-                test_labels.to(device),
-            )
-            slow_test_frames = slow_test_frames.permute(0, 4, 2, 3, 1)
-            fast_test_frames = fast_test_frames.permute(0, 4, 2, 3, 1)
-
-            test_preds = model_binary(slow_test_frames, fast_test_frames)  
-            t_loss = loss_function(test_preds.squeeze(), test_labels.float())
-
-            test_loss += t_loss.item()
-            
-    losses[1, epoch] = test_loss / len(testing_dataloader)
-
-    # Save best model
-    if best_loss > losses[1, epoch]:
-        best_loss = losses[1, epoch] 
-        print(f"Saving Optimal model: {epoch + 1} epoch")
-        torch.save(model_binary.state_dict(), os.path.join("Best_Models", "E2E_SF.pt"))
-
-    print(f"Epoch [{epoch+1}/{epochs}] - Training Loss: {losses[0,epoch]:.4f}, Test Loss: {losses[1,epoch]:.4f}")
-
-# %%
-plt.plot(losses[0], label = 'Training')
-plt.plot(losses[1], label = 'Testing')
-plt.grid()
-plt.xlabel("Epochs")
-plt.ylabel("Loss")
-plt.legend()
-plt.title("Slow-Fast Binary Classification Model")
-plt.savefig("Training_E2E_SF_Binary.png")
-plt.show()
-
-# %%
 model_binary.load_state_dict(torch.load(os.path.join("Best_Models", "E2E_SF.pt")))
 print("Best model loaded!")
 
